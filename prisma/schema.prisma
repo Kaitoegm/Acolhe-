@@ -1,0 +1,161 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  name String
+  passwordHash String
+  role String
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  classes Class[]
+  memberships Membership[]
+  simulations Simulation[]
+  cases ClinicalCase[]
+  reviews Review[]
+}
+
+model Class {
+  id String @id @default(cuid())
+  name String
+  instructorId String
+  instructor User @relation(fields:[instructorId], references:[id])
+  memberships Membership[]
+  assignments Assignment[]
+  simulations Simulation[]
+  createdAt DateTime @default(now())
+  @@index([instructorId])
+}
+
+model Membership {
+  userId String
+  classId String
+  user User @relation(fields:[userId], references:[id])
+  class Class @relation(fields:[classId], references:[id])
+  @@id([userId,classId])
+}
+
+model ClinicalCase {
+  id String @id @default(cuid())
+  slug String? @unique
+  ownerId String
+  owner User @relation(fields:[ownerId], references:[id])
+  currentVersion Int @default(1)
+  demo Boolean @default(false)
+  versions CaseVersion[]
+  assignments Assignment[]
+  createdAt DateTime @default(now())
+  @@index([ownerId])
+}
+
+model CaseVersion {
+  id String @id @default(cuid())
+  caseId String
+  case ClinicalCase @relation(fields:[caseId], references:[id])
+  version Int
+  title String
+  description String
+  patient Json
+  rubric Json
+  status String @default("DRAFT")
+  reviewedAt DateTime?
+  reviewedBy String?
+  createdAt DateTime @default(now())
+  simulations Simulation[]
+  @@unique([caseId,version])
+}
+
+model Assignment {
+  caseId String
+  classId String
+  case ClinicalCase @relation(fields:[caseId], references:[id])
+  class Class @relation(fields:[classId], references:[id])
+  @@id([caseId,classId])
+}
+
+model Simulation {
+  id String @id @default(cuid())
+  studentId String
+  student User @relation(fields:[studentId], references:[id])
+  classId String
+  class Class @relation(fields:[classId], references:[id])
+  caseId String
+  caseVersionId String
+  caseVersion CaseVersion @relation(fields:[caseVersionId], references:[id])
+  draft Json
+  revision Int @default(0)
+  status String @default("DRAFT")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  messages Message[]
+  attempts Attempt[]
+  @@unique([studentId,caseId])
+  @@index([classId])
+}
+
+model Message {
+  id String @id @default(cuid())
+  simulationId String
+  simulation Simulation @relation(fields:[simulationId], references:[id])
+  role String
+  content String
+  createdAt DateTime @default(now())
+  @@index([simulationId,createdAt])
+}
+
+model Attempt {
+  id String @id @default(cuid())
+  simulationId String
+  simulation Simulation @relation(fields:[simulationId], references:[id])
+  number Int
+  revision Int
+  idempotencyKey String
+  snapshot Json
+  conversation Json
+  caseSnapshot Json
+  status String @default("QUEUED")
+  feedback Json?
+  error String?
+  createdAt DateTime @default(now())
+  reviews Review[]
+  job Job?
+  @@unique([simulationId,idempotencyKey])
+  @@unique([simulationId,number])
+  @@unique([simulationId,revision])
+}
+
+model Job {
+  id String @id @default(cuid())
+  attemptId String @unique
+  attempt Attempt @relation(fields:[attemptId], references:[id])
+  state String @default("QUEUED")
+  tries Int @default(0)
+  availableAt DateTime @default(now())
+  leaseUntil DateTime?
+  leaseToken String?
+  updatedAt DateTime @updatedAt
+  @@index([state,availableAt])
+}
+
+model Review {
+  id String @id @default(cuid())
+  attemptId String
+  attempt Attempt @relation(fields:[attemptId], references:[id])
+  authorId String
+  author User @relation(fields:[authorId], references:[id])
+  comment String
+  createdAt DateTime @default(now())
+}
+
+model LoginLimit {
+  key String @id
+  count Int @default(0)
+  windowStart DateTime @default(now())
+}

@@ -1,0 +1,48 @@
+{
+  "name": "acolhe-mais",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "next build",
+    "start": "next start --hostname 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "db:local": "node scripts/local-db.mjs",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts",
+    "admin:create": "tsx scripts/create-admin.ts",
+    "worker": "tsx scripts/worker.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "@tiptap/extension-character-count": "^3.0.0",
+    "@tiptap/react": "^3.0.0",
+    "@tiptap/starter-kit": "^3.0.0",
+    "bcryptjs": "^3.0.2",
+    "iron-session": "^8.0.4",
+    "lucide-react": "^0.468.0",
+    "next": "16.4.2",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "dotenv": "^17.0.0",
+    "prettier": "^3.9.10",
+    "prisma": "6.19.3",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.5"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.2",
+    "tinypool": "^2.2.0"
+  }
+}

@@ -31,6 +31,8 @@ describe('server database integration',()=>{
     const simulations=await db.simulation.findMany({where:{studentId:{in:[studentId,otherId]}},select:{id:true}});
     const ids=simulations.map(s=>s.id);
     await db.review.deleteMany({where:{attempt:{simulationId:{in:ids}}}});
+    await db.reservationBucket.deleteMany({where:{reservation:{job:{attempt:{simulationId:{in:ids}}}}}});
+    await db.usageReservation.deleteMany({where:{job:{attempt:{simulationId:{in:ids}}}}});
     await db.job.deleteMany({where:{attempt:{simulationId:{in:ids}}}});
     await db.attempt.deleteMany({where:{simulationId:{in:ids}}});
     await db.message.deleteMany({where:{simulationId:{in:ids}}});
@@ -53,14 +55,14 @@ describe('server database integration',()=>{
   });
   it('saves incomplete referrals but rejects sending them and rejects stale saves',async()=>{
     expect(await call(`simulations/${simulationId}`,'PUT',{draft:{...EMPTY_DRAFT,outcome:'REFER'},revision:0})).toEqual({revision:1});
-    await expect(call(`simulations/${simulationId}/submit`,'POST',{revision:1,idempotencyKey:'incomplete-draft'})).rejects.toMatchObject({status:400});
+    await expect(call(`simulations/${simulationId}/submit`,'POST',{revision:1,conversationRevision:0,idempotencyKey:'incomplete-draft'})).rejects.toMatchObject({status:400});
     await expect(call(`simulations/${simulationId}`,'PUT',{draft:EMPTY_DRAFT,revision:0})).rejects.toMatchObject({status:409});
   });
   it('snapshots once per revision and reuses idempotent submissions',async()=>{
-    await call(`simulations/${simulationId}`,'PUT',{draft:{...EMPTY_DRAFT,text:'Pessoa relata dor de cabeça. Sem alergias conhecidas.',outcome:'RELEASE'},revision:1});
-    const first=await call(`simulations/${simulationId}/submit`,'POST',{revision:2,idempotencyKey:'submission-one'});attemptId=first.attempt.id;
-    const again=await call(`simulations/${simulationId}/submit`,'POST',{revision:2,idempotencyKey:'submission-two'});
-    expect(again.attempt.id).toBe(attemptId);
+    await call(`simulations/${simulationId}`,'PUT',{draft:{...EMPTY_DRAFT,text:'Pessoa relata dor de cabeça. Sem alergias conhecidas.',ciap:'W78',risk:'NON_ACUTE',outcome:'RELEASE'},revision:1});
+    const first=await call(`simulations/${simulationId}/submit`,'POST',{revision:2,conversationRevision:0,idempotencyKey:'submission-one'});attemptId=first.resourceId;
+    const again=await call(`simulations/${simulationId}/submit`,'POST',{revision:2,conversationRevision:0,idempotencyKey:'submission-two'});
+    expect(again.resourceId).toBe(attemptId);
     await call(`simulations/${simulationId}`,'PUT',{draft:{...EMPTY_DRAFT,text:'Revisão posterior'},revision:2});
     expect((await db.attempt.findUniqueOrThrow({where:{id:attemptId}})).snapshot).toMatchObject({text:'Pessoa relata dor de cabeça. Sem alergias conhecidas.'});
   });
@@ -75,17 +77,17 @@ describe('server database integration',()=>{
   });
   it('recovers an expired worker lease without producing another attempt',async()=>{
     await call(`simulations/${simulationId}`,'PUT',{draft:{...EMPTY_DRAFT,text:'Paciente relata cefaleia. Nega alergias.',ciap:demoCases[0].rubric.acceptedCiap[0],risk:demoCases[0].rubric.acceptedRisks[0],outcome:'RELEASE'},revision:3});
-    const result=await call(`simulations/${simulationId}/submit`,'POST',{revision:4,idempotencyKey:'recover-worker'});
-    await db.job.update({where:{attemptId:result.attempt.id},data:{state:'RUNNING',tries:1,leaseToken:'abandoned-worker',leaseUntil:new Date(Date.now()-1000)}});
+    const result=await call(`simulations/${simulationId}/submit`,'POST',{revision:4,conversationRevision:0,idempotencyKey:'recover-worker'});
+    await db.job.update({where:{attemptId:result.resourceId},data:{state:'RUNNING',tries:1,leaseToken:'abandoned-worker',leaseUntil:new Date(Date.now()-1000)}});
     await runNextJob();
-    const job=await db.job.findUniqueOrThrow({where:{attemptId:result.attempt.id}});
+    const job=await db.job.findUniqueOrThrow({where:{attemptId:result.resourceId}});
     expect(job.state).toBe('COMPLETED');expect(job.tries).toBe(2);expect(job.leaseToken).toBeNull();
     expect(await db.attempt.count({where:{simulationId,revision:4}})).toBe(1);
   });
   it('returns the same attempt for concurrent duplicate submissions',async()=>{
     await call(`simulations/${simulationId}`,'PUT',{draft:{...EMPTY_DRAFT,text:'Paciente relata cefaleia. Nega alergias.',ciap:demoCases[0].rubric.acceptedCiap[0],risk:demoCases[0].rubric.acceptedRisks[0],outcome:'RELEASE'},revision:4});
-    const attempts=await Promise.all([call(`simulations/${simulationId}/submit`,'POST',{revision:5,idempotencyKey:'concurrent-send-one'}),call(`simulations/${simulationId}/submit`,'POST',{revision:5,idempotencyKey:'concurrent-send-two'})]);
-    expect(attempts[0].attempt.id).toBe(attempts[1].attempt.id);
+    const attempts=await Promise.all([call(`simulations/${simulationId}/submit`,'POST',{revision:5,conversationRevision:0,idempotencyKey:'concurrent-send-one'}),call(`simulations/${simulationId}/submit`,'POST',{revision:5,conversationRevision:0,idempotencyKey:'concurrent-send-two'})]);
+    expect(attempts[0].resourceId).toBe(attempts[1].resourceId);
   });
   it('permits comments only for the owning instructor',async()=>{
     await expect(call(`attempts/${attemptId}/reviews`,'POST',{comment:'Revisão'})).rejects.toMatchObject({status:403});
@@ -94,9 +96,20 @@ describe('server database integration',()=>{
   });
   it('publishes a new reviewed version while preserving the simulation original',async()=>{
     const old=await db.caseVersion.findFirstOrThrow({where:{caseId,version:1}});
-    expect(await call(`instructor/cases/${caseId}/publish`,'POST',{classIds:[classId],reviewed:true})).toEqual({ok:true});
+    expect(await call(`instructor/cases/${caseId}/publish`,'POST',{classIds:[classId],reviewed:true,expectedVersion:1})).toEqual({ok:true,version:2});
+    await expect(call(`instructor/cases/${caseId}/publish`,'POST',{classIds:[classId],reviewed:true,expectedVersion:1})).rejects.toMatchObject({status:409});
     expect((await db.caseVersion.findUniqueOrThrow({where:{id:old.id}})).reviewedAt).toBeNull();
     const current=await db.caseVersion.findFirstOrThrow({where:{caseId,version:2}});expect(current.reviewedBy).toBe(instructorId);expect(current.status).toBe('PUBLISHED');
     expect((await db.simulation.findUniqueOrThrow({where:{id:simulationId}})).caseVersionId).toBe(old.id);
+  });
+  it('revoking enrollment also denies history reads and draft writes',async()=>{
+    auth.user.id=studentId;auth.user.role='STUDENT';
+    await db.membership.delete({where:{userId_classId:{userId:studentId,classId}}});
+    try {
+      await expect(call(`simulations/${simulationId}`)).rejects.toMatchObject({status:404});
+      await expect(call(`simulations/${simulationId}/messages`)).rejects.toMatchObject({status:404});
+      await expect(call(`attempts/${attemptId}`)).rejects.toMatchObject({status:404});
+      await expect(call(`simulations/${simulationId}`,'PUT',{draft:EMPTY_DRAFT,revision:5})).rejects.toMatchObject({status:404});
+    } finally { await db.membership.create({data:{userId:studentId,classId}}); }
   });
 });

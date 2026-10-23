@@ -2,6 +2,7 @@ node_modules/
 .next/
 .env
 .env.local
+.env.worker
 *.db
 *.db-journal
 prisma/local.prisma
@@ -10,3 +11,4 @@ playwright-report/
 coverage/
 *.tsbuildinfo
 .superpowers/
+.backups/

@@ -20,6 +20,7 @@ model User {
   simulations Simulation[]
   cases ClinicalCase[]
   reviews Review[]
+  protocolSources ProtocolSource[]
 }
 
 model Class {
@@ -40,6 +41,7 @@ model Membership {
   user User @relation(fields:[userId], references:[id])
   class Class @relation(fields:[classId], references:[id])
   @@id([userId,classId])
+  @@index([classId,userId])
 }
 
 model ClinicalCase {
@@ -48,11 +50,13 @@ model ClinicalCase {
   ownerId String
   owner User @relation(fields:[ownerId], references:[id])
   currentVersion Int @default(1)
+  currentStatus String @default("DRAFT")
   demo Boolean @default(false)
   versions CaseVersion[]
   assignments Assignment[]
   createdAt DateTime @default(now())
   @@index([ownerId])
+  @@index([ownerId,currentStatus,createdAt,id])
 }
 
 model CaseVersion {
@@ -69,6 +73,7 @@ model CaseVersion {
   reviewedBy String?
   createdAt DateTime @default(now())
   simulations Simulation[]
+  criteria CaseCriterion[]
   @@unique([caseId,version])
 }
 
@@ -91,13 +96,22 @@ model Simulation {
   caseVersion CaseVersion @relation(fields:[caseVersionId], references:[id])
   draft Json
   revision Int @default(0)
+  conversationRevision Int @default(0)
+  riskRank Int @default(4)
+  patientName String @default("")
+  patientNameSearch String @default("")
   status String @default("DRAFT")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   messages Message[]
   attempts Attempt[]
+  chatTurns ChatTurn[]
   @@unique([studentId,caseId])
   @@index([classId])
+  @@index([studentId,createdAt,id])
+  @@index([classId,createdAt,id])
+  @@index([studentId,riskRank,createdAt,id])
+  @@index([classId,riskRank,createdAt,id])
 }
 
 model Message {
@@ -107,7 +121,7 @@ model Message {
   role String
   content String
   createdAt DateTime @default(now())
-  @@index([simulationId,createdAt])
+  @@index([simulationId,createdAt,id])
 }
 
 model Attempt {
@@ -126,6 +140,9 @@ model Attempt {
   createdAt DateTime @default(now())
   reviews Review[]
   job Job?
+  evidenceSnapshot Json?
+  evaluationVersion Int @default(1)
+  revisionDraft AttemptRevision?
   @@unique([simulationId,idempotencyKey])
   @@unique([simulationId,number])
   @@unique([simulationId,revision])
@@ -133,8 +150,17 @@ model Attempt {
 
 model Job {
   id String @id @default(cuid())
-  attemptId String @unique
-  attempt Attempt @relation(fields:[attemptId], references:[id])
+  kind String @default("EVALUATION")
+  generation Int @default(1)
+  stage String @default("QUEUED")
+  progressVersion Int @default(0)
+  ownerId String @default("")
+  instructorId String @default("")
+  attemptId String? @unique
+  attempt Attempt? @relation(fields:[attemptId], references:[id])
+  chatTurnId String? @unique
+  chatTurn ChatTurn? @relation(fields:[chatTurnId], references:[id])
+  reservations UsageReservation[]
   state String @default("QUEUED")
   tries Int @default(0)
   availableAt DateTime @default(now())
@@ -142,6 +168,7 @@ model Job {
   leaseToken String?
   updatedAt DateTime @updatedAt
   @@index([state,availableAt])
+  @@index([ownerId,state])
 }
 
 model Review {
@@ -152,10 +179,140 @@ model Review {
   author User @relation(fields:[authorId], references:[id])
   comment String
   createdAt DateTime @default(now())
+  @@index([attemptId,createdAt,id])
 }
 
 model LoginLimit {
   key String @id
   count Int @default(0)
   windowStart DateTime @default(now())
+}
+
+model ChatTurn {
+ id String @id @default(cuid())
+ simulationId String
+ simulation Simulation @relation(fields:[simulationId],references:[id])
+ idempotencyKey String
+ revision Int
+ conversationRevision Int
+ patient Json
+ conversation Json
+ content String
+ result String?
+ error String?
+ status String @default("QUEUED")
+ createdAt DateTime @default(now())
+ job Job?
+ @@unique([simulationId,idempotencyKey])
+ @@index([simulationId,status])
+ @@index([simulationId,createdAt,id])
+}
+model UsageBucket {
+ id String @id @default(cuid())
+ scope String
+ scopeId String
+ operation String
+ windowStart DateTime
+ used Int @default(0)
+ reserved Int @default(0)
+ limit Int
+ links ReservationBucket[]
+ @@unique([scope,scopeId,operation,windowStart])
+}
+model UsageReservation {
+ id String @id @default(cuid())
+ key String @unique
+ userId String
+ jobId String
+ job Job @relation(fields:[jobId],references:[id])
+ generation Int
+ state String @default("RESERVED")
+ createdAt DateTime @default(now())
+ buckets ReservationBucket[]
+ @@unique([jobId,generation])
+}
+model ReservationBucket {
+ reservationId String
+ bucketId String
+ reservation UsageReservation @relation(fields:[reservationId],references:[id])
+ bucket UsageBucket @relation(fields:[bucketId],references:[id])
+ @@id([reservationId,bucketId])
+}
+model AiInvocation {
+ id String @id @default(cuid())
+ jobId String
+ generation Int
+ number Int
+ state String @default("STARTED")
+ model String
+ startedAt DateTime @default(now())
+ finishedAt DateTime?
+ @@unique([jobId,generation,number])
+}
+model WorkerSlot {
+ id Int @id
+ token String?
+ leaseUntil DateTime?
+}
+model WorkerHeartbeat {
+ id String @id
+ lastSeen DateTime @default(now())
+}
+
+model ProtocolSource {
+ id String @id @default(cuid())
+ ownerId String
+ owner User @relation(fields:[ownerId],references:[id],onDelete:Cascade)
+ key String
+ versions ProtocolVersion[]
+ @@unique([ownerId,key])
+}
+
+model ProtocolVersion {
+ id String @id @default(cuid())
+ sourceId String
+ source ProtocolSource @relation(fields:[sourceId],references:[id],onDelete:Cascade)
+ hash String
+ data Json
+ createdAt DateTime @default(now())
+ @@unique([sourceId,hash])
+}
+
+model CriterionVersion {
+ id String @id @default(cuid())
+ data Json
+ createdAt DateTime @default(now())
+ cases CaseCriterion[]
+}
+
+model CaseCriterion {
+ caseVersionId String
+ criterionVersionId String
+ caseVersion CaseVersion @relation(fields:[caseVersionId],references:[id],onDelete:Cascade)
+ criterionVersion CriterionVersion @relation(fields:[criterionVersionId],references:[id])
+ @@id([caseVersionId,criterionVersionId])
+}
+
+model AttemptRevision {
+ id String @id @default(cuid())
+ attemptId String @unique
+ attempt Attempt @relation(fields:[attemptId],references:[id],onDelete:Cascade)
+ version Int @default(0)
+ document Json
+ decisions Json
+ updatedAt DateTime @updatedAt
+ actions RevisionAction[]
+}
+
+model RevisionAction {
+ id String @id @default(cuid())
+ revisionId String
+ revision AttemptRevision @relation(fields:[revisionId],references:[id],onDelete:Cascade)
+ idempotencyKey String
+ findingId String
+ state String
+ authorId String
+ createdAt DateTime @default(now())
+ @@unique([revisionId,idempotencyKey])
+ @@index([revisionId,createdAt,id])
 }

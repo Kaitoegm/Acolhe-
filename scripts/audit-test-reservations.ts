@@ -1,0 +1,5 @@
+import 'dotenv/config';
+import {db} from '../src/lib/server/db';
+import {planTestCleanup} from '../src/lib/maintenance/test-data';
+async function main(){const plan=await planTestCleanup(db);const reservations=await db.usageReservation.findMany({where:{job:{OR:[{ownerId:{in:plan.userIds}},{attempt:{simulationId:{in:plan.simulationIds}}},{chatTurn:{simulationId:{in:plan.simulationIds}}}]}},include:{buckets:{include:{bucket:true}}}});const map=new Map<string,{id:string;scope:string;operation:string;used:number;reserved:number;neededUsed:number;neededReserved:number}>();for(const r of reservations)for(const link of r.buckets){const b=link.bucket;const c=map.get(b.id)||{id:b.id,scope:b.scope,operation:b.operation,used:b.used,reserved:b.reserved,neededUsed:0,neededReserved:0};if(r.state==='CONSUMED')c.neededUsed++;if(r.state==='RESERVED')c.neededReserved++;map.set(b.id,c);}console.log(JSON.stringify([...map.values()].filter(b=>b.used<b.neededUsed||b.reserved<b.neededReserved),null,2));}
+main().catch(console.error).finally(()=>db.$disconnect());

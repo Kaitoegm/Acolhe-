@@ -8,7 +8,7 @@ describe('server access boundaries', () => {
     expect(() => assertOrigin(new Request('http://localhost:3000/api/login', {method:'POST', headers:{origin:'http://localhost:3000'}}))).not.toThrow();
   });
   it('scopes students to their own records and instructors to their own classes', () => {
-    expect(simulationScope({id:'s1',role:'STUDENT'})).toEqual({studentId:'s1'});
+    expect(simulationScope({id:'s1',role:'STUDENT'})).toEqual({studentId:'s1',class:{memberships:{some:{userId:'s1'}}}});
     expect(simulationScope({id:'i1',role:'INSTRUCTOR'})).toEqual({class:{instructorId:'i1'}});
   });
   it('never lets an instructor mutate a student simulation', () => {

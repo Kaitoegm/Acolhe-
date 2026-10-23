@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_DRAFT, type Evaluation } from '../src/lib/contracts';
-import { demoCases, evaluateSubmission, normalizeFeedback, patientReply, validateDraft } from '../src/lib/domain';
+import { demoCases, validateDraft } from '../src/lib/domain';
+import { evaluateSubmission, normalizeFeedback, patientReply } from '../src/lib/domain/ai';
 
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 const draft = () => ({ ...EMPTY_DRAFT, text: 'Pessoa relata cansaço.', procedures: [], services: [] });

@@ -1,5 +1,7 @@
 # Acolhe+
 
+Avaliação com revisão animada: veja [o guia de uso e configuração](docs/evaluation-v2.md) e [a verificação da implementação](docs/evaluation-execution.md).
+
 Plataforma de **simulação educacional** de acolhimento para técnicos de enfermagem, com interface inspirada nas referências do PEC. Não é uma instalação oficial do PEC e não recebe prontuários reais.
 
 ## Executar localmente
@@ -9,9 +11,12 @@ Requisitos: Node.js 22.12+ (verificado nesta máquina com Node 24) e npm.
 ```powershell
 npm install
 npm run db:local
+npm run db:backfill
 npm run db:seed
 npm run dev
 ```
+
+Em outro terminal, execute `npm run worker`. Conversas e avaliações aguardam esse processo; a aplicação web somente registra os pedidos na fila.
 
 Abra **http://localhost:3000**. Use exatamente esse endereço; o servidor valida a origem das requisições.
 
@@ -24,7 +29,7 @@ Contas locais criadas pelo seed:
 | Aluno | `aluno@acolhe.local` | `Acolhe+2026!` |
 | Instrutor | `instrutor@acolhe.local` | `Acolhe+2026!` |
 
-Essas senhas são exclusivamente para a demonstração local. Se `DEMO_PASSWORD` tiver sido alterada **antes do primeiro seed**, utilize o valor configurado. Reexecutar o seed não redefine senhas existentes. O seed é bloqueado em produção.
+Essas senhas são exclusivamente o padrão de uma instalação local nova. Se `DEMO_PASSWORD` tiver sido alterada, utilize o valor configurado. A versão atual do seed sincroniza as senhas das duas contas demonstrativas com essa variável ao ser executada. O seed é bloqueado em produção.
 
 ## O que está implementado
 
@@ -44,11 +49,10 @@ Configure no servidor:
 
 ```dotenv
 AI_MODE="live"
-AI_BASE_URL="https://seu-provedor.example/v1"
-AI_API_KEY="sua-chave"
-AI_MODEL="modelo-disponivel-no-seu-provedor"
 ALLOW_DEMO_CASES="false"
 ```
+
+Coloque `AI_BASE_URL`, `AI_API_KEY` e `AI_MODEL` exclusivamente em `.env.worker` (veja `.env.worker.example`) ou nas variáveis de ambiente do processo worker. A aplicação web não precisa da chave do provedor. Mantenha `AI_MODE` igual nos dois processos.
 
 O adaptador usa uma API compatível com Chat Completions e JSON. Nenhuma chave vai para o navegador. O paciente seleciona fatos do caso: texto clínico inventado pelo modelo não é repassado. A revisão de linguagem recebe texto e fatos; classificações e códigos são avaliados por regras da rubrica revisada, não pelo modelo.
 
@@ -59,18 +63,19 @@ Falhas do provedor mantêm a tentativa salva; após as tentativas automáticas, 
 O esquema principal `prisma/schema.prisma` e as migrations são PostgreSQL. `prisma/local.prisma` é gerado para desenvolvimento SQLite e não deve ser usado em produção.
 
 1. Provisione PostgreSQL (ou use `compose.yaml` com `POSTGRES_PASSWORD` definido).
-2. Configure `DATABASE_URL`, `SESSION_SECRET` aleatória, `APP_URL` HTTPS e as variáveis de IA no ambiente do servidor.
+2. Configure `DATABASE_URL`, `SESSION_SECRET` aleatória, `APP_URL` HTTPS e limites de quota no ambiente web/worker. As credenciais do provedor ficam somente no worker.
 3. Execute:
 
 ```powershell
 npm ci
 npm run db:generate
 npx prisma migrate deploy
+npm run db:backfill
 npm run build
 npm run start
 ```
 
-4. Execute `npm run worker` em um segundo processo supervisionado. O servidor também dispara processamento após envios e consultas de tarefas pendentes; o worker mantém a recuperação mesmo sem um navegador aberto.
+4. Execute `npm run worker` em um segundo processo supervisionado. Somente o worker executa IA. As consultas de status não processam nem alteram trabalhos.
 5. Para criar o primeiro instrutor, forneça `ADMIN_EMAIL`, `ADMIN_PASSWORD` (12 caracteres ou mais) e opcionalmente `ADMIN_NAME` ao processo e execute `npm run admin:create`. O comando não altera contas existentes.
 6. Cadastre turma/alunos, prepare os casos e publique apenas após revisão do responsável de enfermagem.
 
@@ -84,9 +89,23 @@ npm run typecheck
 npm run build
 npx playwright install chromium
 npm run test:e2e
+# Com a web rodando, carga HTTP local com fixtures isoladas e limpeza automática:
+npm run test:load
 ```
 
-Os testes E2E exigem o banco local com seed e modo demonstrativo; criam dados de teste identificados. O Playwright inicia o servidor se a porta 3000 estiver livre. Screenshots e traces ficam em `test-results/`.
+Os testes E2E exigem o banco local atualizado com seed e modo demonstrativo; criam dados de teste identificados. O Playwright inicia a web se a porta 3000 estiver livre e inicia um worker separado. Screenshots e traces ficam em `test-results/`.
+
+## Quotas e operação da fila
+
+As listagens usam páginas de 25 itens (máximo 100), cursores assinados vinculados ao usuário e filtros no banco. Históricos são carregados sob demanda. Pedidos aceitos de conversa/avaliação retornam HTTP 202; falta de quota retorna 429 com horário de renovação.
+
+Limites diários UTC: aluno 100 conversas/20 avaliações; responsável pelas turmas 3.000/300; implantação 6.000/600. O provedor tem teto independente de 10.000 chamadas/dia, incluindo retries. Variáveis `AI_QUOTA_*` em `.env.example` permitem configurar esses valores. São limites de volume, não um orçamento monetário garantido.
+
+Cada aluno pode ter dois trabalhos pendentes. Uma simulação aceita um turno de conversa pendente; o rascunho pode ser editado enquanto o paciente responde. Salvamento e leitura permanecem disponíveis quando a quota se esgota. Há no máximo três chamadas automáticas por geração; retry manual exige nova unidade. Falhas anteriores ao envio liberam a reserva; chamadas já despachadas permanecem contabilizadas.
+
+No máximo dois slots globais permitem execução simultânea, mesmo com várias instâncias do worker. Leases duram 120 segundos, renovados a cada 20. Configure supervisão e reinício automático do processo. O heartbeat permite à interface indicar worker indisponível; a web nunca assume seu processamento.
+
+Para atualizar uma instalação existente, pause novos envios e drene a fila antiga antes das migrations. Execute o backfill, inicie o worker novo e depois a web nova. Trabalhos antigos que restarem sem reserva são marcados como falha recuperável, mantendo o snapshot para nova análise com quota. Não misture produtores antigos e novos.
 
 ## Organização
 
@@ -102,6 +121,8 @@ Os testes E2E exigem o banco local com seed e modo demonstrativo; criam dados de
 Os catálogos são um **subconjunto demonstrativo**, não a tabela SIGTAP completa de uma competência atual. Fontes e versão estão em `src/lib/domain/catalogs.ts`. Novos códigos e critérios devem ser revisados antes de ampliar os casos.
 
 ## Limites desta entrega
+
+O [caderno de casos para validação](docs/casos-para-validacao.md) reúne os cenários e os pontos de revisão do responsável. `npm run db:cases` importa os casos como pendentes, sem publicá-los ou atribuí-los a alunos; repetir o comando preserva edições existentes. A [documentação de manutenção](docs/case-bank-execution.md) explica a limpeza conservadora dos dados de testes e seus backups.
 
 - IA real depende das credenciais e do modelo do provedor; o modo local permite testar a experiência sem custos de API.
 - O piloto com usuários reais depende da aprovação dos casos/protocolos por responsável de enfermagem.

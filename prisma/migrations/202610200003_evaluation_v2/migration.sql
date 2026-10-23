@@ -1,0 +1,23 @@
+ALTER TABLE "Attempt" ADD COLUMN "evidenceSnapshot" JSONB;
+ALTER TABLE "Attempt" ADD COLUMN "evaluationVersion" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE "Job" ADD COLUMN "stage" TEXT NOT NULL DEFAULT 'QUEUED';
+ALTER TABLE "Job" ADD COLUMN "progressVersion" INTEGER NOT NULL DEFAULT 0;
+UPDATE "Job" SET "stage" = "state" WHERE "state" IN ('COMPLETED','FAILED');
+
+CREATE TABLE "ProtocolSource" ("id" TEXT NOT NULL,"ownerId" TEXT NOT NULL,"key" TEXT NOT NULL,CONSTRAINT "ProtocolSource_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "ProtocolVersion" ("id" TEXT NOT NULL,"sourceId" TEXT NOT NULL,"hash" TEXT NOT NULL,"data" JSONB NOT NULL,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,CONSTRAINT "ProtocolVersion_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "CriterionVersion" ("id" TEXT NOT NULL,"data" JSONB NOT NULL,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,CONSTRAINT "CriterionVersion_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "CaseCriterion" ("caseVersionId" TEXT NOT NULL,"criterionVersionId" TEXT NOT NULL,CONSTRAINT "CaseCriterion_pkey" PRIMARY KEY ("caseVersionId","criterionVersionId"));
+CREATE TABLE "AttemptRevision" ("id" TEXT NOT NULL,"attemptId" TEXT NOT NULL,"version" INTEGER NOT NULL DEFAULT 0,"document" JSONB NOT NULL,"decisions" JSONB NOT NULL,"updatedAt" TIMESTAMP(3) NOT NULL,CONSTRAINT "AttemptRevision_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "RevisionAction" ("id" TEXT NOT NULL,"revisionId" TEXT NOT NULL,"idempotencyKey" TEXT NOT NULL,"findingId" TEXT NOT NULL,"state" TEXT NOT NULL,"authorId" TEXT NOT NULL,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,CONSTRAINT "RevisionAction_pkey" PRIMARY KEY ("id"));
+CREATE UNIQUE INDEX "ProtocolSource_ownerId_key_key" ON "ProtocolSource"("ownerId","key");
+CREATE UNIQUE INDEX "ProtocolVersion_sourceId_hash_key" ON "ProtocolVersion"("sourceId","hash");
+CREATE UNIQUE INDEX "AttemptRevision_attemptId_key" ON "AttemptRevision"("attemptId");
+CREATE UNIQUE INDEX "RevisionAction_revisionId_idempotencyKey_key" ON "RevisionAction"("revisionId","idempotencyKey");
+CREATE INDEX "RevisionAction_revisionId_createdAt_id_idx" ON "RevisionAction"("revisionId","createdAt","id");
+ALTER TABLE "ProtocolSource" ADD CONSTRAINT "ProtocolSource_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ProtocolVersion" ADD CONSTRAINT "ProtocolVersion_sourceId_fkey" FOREIGN KEY ("sourceId") REFERENCES "ProtocolSource"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "CaseCriterion" ADD CONSTRAINT "CaseCriterion_caseVersionId_fkey" FOREIGN KEY ("caseVersionId") REFERENCES "CaseVersion"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "CaseCriterion" ADD CONSTRAINT "CaseCriterion_criterionVersionId_fkey" FOREIGN KEY ("criterionVersionId") REFERENCES "CriterionVersion"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "AttemptRevision" ADD CONSTRAINT "AttemptRevision_attemptId_fkey" FOREIGN KEY ("attemptId") REFERENCES "Attempt"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "RevisionAction" ADD CONSTRAINT "RevisionAction_revisionId_fkey" FOREIGN KEY ("revisionId") REFERENCES "AttemptRevision"("id") ON DELETE CASCADE ON UPDATE CASCADE;

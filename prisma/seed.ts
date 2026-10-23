@@ -6,10 +6,10 @@ import { json } from '../src/lib/server/views';
 async function main(){
   if(process.env.NODE_ENV==='production' || process.env.AI_MODE!=='demo' || process.env.ALLOW_DEMO_CASES!=='true') throw new Error('Seed permitido somente em demonstração local explícita.');
   const password=process.env.DEMO_PASSWORD;
-  if(!password || password.length<12) throw new Error('Defina DEMO_PASSWORD com pelo menos 12 caracteres.');
+  if(!password || password.length<4) throw new Error('Defina DEMO_PASSWORD com pelo menos 4 caracteres.');
   const passwordHash=await hash(password,12);
-  const instructor=await db.user.upsert({where:{email:'instrutor@acolhe.local'},update:{},create:{email:'instrutor@acolhe.local',name:'Instrutora demonstração',passwordHash,role:'INSTRUCTOR'}});
-  const student=await db.user.upsert({where:{email:'aluno@acolhe.local'},update:{},create:{email:'aluno@acolhe.local',name:'Aluno demonstração',passwordHash,role:'STUDENT'}});
+  const instructor=await db.user.upsert({where:{email:'instrutor@acolhe.local'},update:{passwordHash},create:{email:'instrutor@acolhe.local',name:'Instrutora demonstração',passwordHash,role:'INSTRUCTOR'}});
+  const student=await db.user.upsert({where:{email:'aluno@acolhe.local'},update:{passwordHash},create:{email:'aluno@acolhe.local',name:'Aluno demonstração',passwordHash,role:'STUDENT'}});
   const classroom=await db.class.upsert({where:{id:'demo-class'},update:{},create:{id:'demo-class',name:'Turma demonstração',instructorId:instructor.id}});
   await db.membership.upsert({where:{userId_classId:{userId:student.id,classId:classroom.id}},update:{},create:{userId:student.id,classId:classroom.id}});
   for(const c of demoCases){
